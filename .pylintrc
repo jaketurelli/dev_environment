@@ -1,0 +1,1 @@
+extension-pkg-whitelist=pinocchio, matplotlib, scipy, numpy, meshcat
