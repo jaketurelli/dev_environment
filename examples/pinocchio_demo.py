@@ -1,4 +1,3 @@
-from pinocchio.visualize import MeshcatVisualizer as Visualizer
 import pinocchio as pin
 import hppfcl as fcl
 import numpy as np
@@ -75,12 +74,11 @@ for k in range(N):
     joint_placement = body_placement.copy()
 
 
-viz = Visualizer(model, collision_model=geom_model, visual_model=geom_model)
+viz = meshcat_monitor.MeshcatVisualizer(model, collision_model=geom_model, visual_model=geom_model)
 
 # Initialize the viewer
 viz.initViewer(open=True)
 viz.loadViewerModel("pinocchio")
-monitor = meshcat_monitor.MonitorVisualizer(viz)
 
 # Display a robot configuration.
 q0 = pin.neutral(model)
@@ -104,7 +102,7 @@ tau_control = np.zeros((model.nv))
 damping_value = 0.4
 
 
-while monitor.is_open():
+while viz.is_open():
 
     tic = time.time()
     tau_control = -damping_value * v  # small damping
