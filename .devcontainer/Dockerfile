@@ -1,3 +1,4 @@
+# start with a base dev container
 FROM mcr.microsoft.com/devcontainers/base:jammy
 
 # Configure apt and install packages in noninteractive mode
@@ -22,20 +23,22 @@ RUN apt-get update \
     libsfml-dev
 
 # install python libraries
+RUN pip install \
 
-#   for installation
-RUN pip install setuptools
+    # for installation
+    setuptools \
 
-#   common scientific tools
-RUN pip install matplotlib
-RUN pip install scipy
-RUN pip install numpy
+    # common scientific tools
+    matplotlib \
+    scipy \
+    numpy \
+    quadprog \
 
-#   robotics simulation
-RUN pip install pin
+    # robotics simulation
+    pin \
 
-#   robotics visualization
-RUN pip install meshcat
+    # robotics visualization
+    meshcat
 
 # create a symbolic linking python to python3 for conveniencce
 RUN ln -s /usr/bin/python3 /usr/bin/python
