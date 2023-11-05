@@ -1,7 +1,5 @@
 
 import basic_robot as br
-import pinocchio as pin
-import numpy as np
 
 inches = lambda value: value / 39.3701  # convert to sim units: from inches --> meters
 grams = lambda value: value / 1000.  # convert to sim units: from grams --> kg
@@ -46,7 +44,7 @@ class BasicBiped(br.BasicRobot):
         'joint_placement': {'x': pelvis_depth * 1.1},
         'body_placement': {'z': -leg_length / 2.},
         'shape': "cylinder",
-        'dimensions': (pelvis_depth * 0.4, leg_length * 0.8),
+        'dimensions': (pelvis_depth * 0.4, leg_length * 0.9),
         'mass': leg_mass,
         'color': 'white'
     }, {
@@ -56,7 +54,7 @@ class BasicBiped(br.BasicRobot):
         'joint_placement': {'z': -leg_length},
         'body_placement': {'z': -leg_length / 2.},
         'shape': "cylinder",
-        'dimensions': (pelvis_depth * 0.4, leg_length * 0.8),
+        'dimensions': (pelvis_depth * 0.4, leg_length * 0.9),
         'mass': leg_mass,
         'color': 'white',
         'contacting': "floor"
@@ -77,47 +75,62 @@ class BasicBiped(br.BasicRobot):
 if __name__ == "__main__":
     import math
     import time
-    import meshcat_monitor
     import quadprog
+    import numpy as np
+    import pinocchio as pin
+    import meshcat_monitor
+    import meshcat.transformations as tf
 
+    # create robot
     robot = BasicBiped()
+    q = robot.q0  # positions in joint-space
+    dq = robot.v0  # velocities in joint-space (derivative of q)
+    ddq = robot.a0  # accelerations in joint-space (derivative of dq)
 
+    # modify initial pose
+    q[-2] -= math.pi / 8.
+
+    # visualize robot
     robot.viz = robot.initViz(meshcat_monitor.MeshcatVisualizer)
     robot.initViewer(open=True)
     robot.loadViewerModel()
     robot.displayVisuals(True)
-    robot.q0[-2] -= math.pi / 8.
-    robot.display(robot.q0)
-    if robot.viz.is_open():
-        robot.viz.viewer["/Cameras/default/rotated/<object>"].set_property("zoom", 3.0)
-        time.sleep(0.6)
+    robot.viz.viewer['/Cameras/default/rotated/<object>'].set_transform(
+        tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
+    robot.display(q)
+    time.sleep(0.3)  # let the user see the robot in its default pose briefly before simulating
 
-    dt = 0.001
-    fps = 30
-    Kp_c = 1000.
-    Kv_c = 1000.
-    Kv_impact = 0.1
-    Kf = 0.01
-    tau = np.zeros((robot.model.nv))
-    loops_per_display = int((1 / fps) / dt)
-
+    # simulation settings
+    dt = 0.001                           # time step size to integrate with (can be different than display fps)
+    fps = 30                             # frames per second to display
+    Kp_contact = 1000.                   # stiffness constant for contact distance
+    Kv_contact = 1000.                   # stiffness constant for contact velocity
+    Kv_impact = 0.1                      # stiffness constant for impact velocity
+    Kf = 0.01                            # joint-space friction constant
+    tau = np.zeros((robot.model.nv))     # control torques/forces in joint-space
+    loops_to_disp = int((1 / fps) / dt)  # number of time steps to simulate before re-displaying
+    warn_if_not_real_time = True         # produce a warning if
     loop = 0
     target_time = time.time()
+
+    # sim until the user closes the visualizer window
     while robot.viz.is_open():
 
-        # Compute the model.
-        M = pin.crba(robot.model, robot.data, robot.q0)
-        b = pin.nle(robot.model, robot.data, robot.q0, robot.v0)
+        # Compute the model's "M" = Mass matrix and "b" = Nonlinear force components
+        # in joint-space (Fq_ext w/gravity + coriolis forces)
+        M = pin.crba(robot.model, robot.data, q)
+        b = pin.nle(robot.model, robot.data, q, dq)
 
-        # add some joint friction (but don't apply any joint friction forces to the floating 6-dof root joint)
-        tau[-6:] = -Kf * robot.v0[-6:]
+        # add some joint friction (but don't apply any joint friction forces to the
+        # floating 6-dof root joint)
+        tau[-6:] = -Kf * dq[-6:]
 
-        # Simulated the resulting acceleration (forward dynamics)
-        joint_forces = tau - b
-        aq = np.linalg.inv(M) @ joint_forces  # F = M*a
+        # simulate the resulting acceleration (forward dynamics)
+        Fq = tau - b
+        ddq = np.linalg.inv(M) @ Fq  # solves F = M*a for acceleration in joint-space
 
-        # Check collision
-        robot.computeCollisions(robot.q0, robot.v0)
+        # check and account for collisions
+        robot.computeCollisions(q, dq)
         collisions = robot.getCollisionList()
         if not collisions:
             already_contact = set()
@@ -126,31 +139,32 @@ if __name__ == "__main__":
             J = robot.getCollisionJacobian(collisions)
             JdotQdot = robot.getCollisionJdotQdot(collisions)
 
-            # Update contact tracking and nullify velocity of new contact
-            col_id = [e[0] for e in collisions]
-            new_col_idx = [i for i, e in enumerate(col_id) if e not in already_contact]
-            already_contact = set(col_id)
-            if new_col_idx:
-                J_proj = np.stack([J[i] for i in new_col_idx], axis=0)
-                impact_impulse_vel = (np.linalg.pinv(J_proj) @ J_proj) @ robot.v0
-                robot.v0 -= impact_impulse_vel * Kv_impact
+            # for a new contact, add in an elastic impact velocity
+            if Kv_impact > 0:
+                col_id = [e[0] for e in collisions]
+                new_col_idx = [i for i, e in enumerate(col_id) if e not in already_contact]
+                already_contact = set(col_id)
+                if new_col_idx:
+                    J_proj = np.stack([J[i] for i in new_col_idx], axis=0)
+                    impact_vel = (np.linalg.pinv(J_proj) @ J_proj) @ dq
+                    dq -= impact_vel * Kv_impact
 
-            # Find real acceleration using Gauss principle
-            A = M
-            b = joint_forces  # same as "M @ aq"
-            C = J
-            d = - JdotQdot - Kp_c * dist - Kv_c * J @ robot.v0
-            [aq, cost, _, niter, lag, iact] = quadprog.solve_qp(A, b, C.T, d)
+            # The adjusted joint-space acceleration with the contact(s) needs to
+            # Use Gauss principle to find joint-space accelerations (ddq) that satisfies:
+            #       Minimize:                1/2 ddq^T M ddq - Fq^T ddq
+            #       Subject to constraint:   J.T ddq >= d
+            d = - JdotQdot - Kp_contact * dist - Kv_contact * J @ dq
+            ddq, _, _, _, _, _ = quadprog.solve_qp(M, Fq, J.T, d)
 
-        # Integrate the acceleration.
-        robot.v0 += aq * dt
-        robot.q0 = pin.integrate(robot.model, robot.q0, robot.v0 * dt)
+        # integrate the acceleration (ddq) to update the model's velocities (dq), and positions (q)
+        dq += ddq * dt
+        q = pin.integrate(robot.model, q, dq * dt)
 
         # update display
         loop += 1
-        updated_display = loop % loops_per_display == 0
+        updated_display = loop % loops_to_disp == 0
         if updated_display:
-            robot.display(robot.q0)
+            robot.display(q)
             robot.displayCollisionMarkers(collisions)
 
         # wait for next time step
@@ -159,6 +173,6 @@ if __name__ == "__main__":
         sleep_time = max(0, diff_time)
         if sleep_time > 0:
             time.sleep(sleep_time)
-        elif diff_time < -0.5 and updated_display:
+        elif warn_if_not_real_time and diff_time < -0.5 and updated_display:
             print(f'Warning: Time slowed by {diff_time:0.3f} seconds. Consider '
                   'lowering the fps value, or raising the integration time (dt).')

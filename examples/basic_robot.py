@@ -69,6 +69,7 @@ class BasicRobot(pin.RobotWrapper):
         self.collision_data = self.collision_model.createData()
         self.collision_data.collisionRequests.enable_contact = bool(self.contact_pairs)
         self.visual_data = self.visual_model.createData()
+        self.a0 = pin.utils.zero(self.nv)
         self.v0 = pin.utils.zero(self.nv)
         self.q0 = pin.neutral(self.model)
 
