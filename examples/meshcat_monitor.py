@@ -3,7 +3,6 @@ import pinocchio as pin
 import time
 import threading
 import subprocess
-import meshcat
 
 
 class MonitorVisualizer():
