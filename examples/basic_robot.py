@@ -220,6 +220,27 @@ class BasicRobot(pin.RobotWrapper):
         J = (Jc2 - Jc1)[2, :]
         return J
 
+    def getOneCollisionVelDiff(self, col, res):
+        '''Compute the velocity difference between the two colliding objects. '''
+        contact = res.getContact(0)
+        g1 = self.collision_model.geometryObjects[col.first]
+        g2 = self.collision_model.geometryObjects[col.second]
+        joint1 = g1.parentJoint
+        joint2 = g2.parentJoint
+        vel1 = pin.getVelocity(self.model, self.data, joint1, pin.ReferenceFrame.LOCAL)
+        vel2 = pin.getVelocity(self.model, self.data, joint2, pin.ReferenceFrame.LOCAL)
+        return vel2 - vel1
+
+    def getCollisionVelDiff(self, collisions=None):
+        '''From a collision list, compute the velocity differences between all the pairs of colliding objects. '''
+        if collisions is None:
+            collisions = self.getCollisionList()
+        if len(collisions) == 0:
+            return np.ndarray([0, self.model.nv])
+        velocities = np.vstack([self.getOneCollisionVelDiff(c, r)
+                                for (i, c, r) in collisions])
+        return velocities
+
     def getOneCollisionJdotQdot(self, col, res):
         '''Compute the Coriolis acceleration for one collision only. '''
         contact = res.getContact(0)
