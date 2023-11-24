@@ -73,6 +73,41 @@ class BasicRobot(pin.RobotWrapper):
         self.v0 = pin.utils.zero(self.nv)
         self.q0 = pin.neutral(self.model)
 
+        # to record the collision/contact data
+        self.first_contacts = {}
+        self.colliding_joints = set()
+        self.contact_dict = {}
+        self.new_collisions = set()
+        self.contact_joint_to_index = {}
+
+    def getAndProcessCollisions(self, floor_joint_id):
+        collisions = self.getCollisionList()
+        self.colliding_joints = set()
+        self.new_collisions = set()
+        if not collisions:
+            self.first_contacts = {}
+        else:
+            self.contact_dict = {}
+            for index, (_, col, res) in enumerate(collisions):
+                joint1 = self.collision_model.geometryObjects[col.first].parentJoint
+                joint2 = self.collision_model.geometryObjects[col.second].parentJoint
+                joint_id = joint1 if joint1 != floor_joint_id else joint2
+                self.contact_joint_to_index[joint_id] = index
+                self.colliding_joints.add(joint_id)
+                contact = res.getContact(0)
+                if joint_id in self.contact_dict:
+                    contact.pos = (contact.pos + self.contact_dict[joint_id].pos) * 0.5
+                self.contact_dict[joint_id] = contact
+
+            for joint_id in range(len(self.model.joints)):
+                if joint_id in self.colliding_joints:
+                    if joint_id not in self.first_contacts:
+                        self.first_contacts[joint_id] = self.contact_dict[joint_id]
+                        self.new_collisions.add(joint_id)
+                else:
+                    self.first_contacts.pop(joint_id, None)
+        return collisions
+
     def initViz(self, class_obj):
         self.viz = class_obj(model=self.model,
                              collision_model=self.collision_model,
@@ -195,7 +230,7 @@ class BasicRobot(pin.RobotWrapper):
         return [[ir, self.collision_model.collisionPairs[ir], r]
                 for ir, r in enumerate(self.collision_data.collisionResults) if r.isCollision()]
 
-    def getOneCollisionJacobian(self, col, res):
+    def getOneCollisionJacobian(self, col, res, dir_index):
         '''Compute the jacobian for one collision only. '''
         contact = res.getContact(0)
         g1 = self.collision_model.geometryObjects[col.first]
@@ -217,8 +252,12 @@ class BasicRobot(pin.RobotWrapper):
             self.model, self.data, joint2, pin.ReferenceFrame.LOCAL)
         Jc1 = cMj1.action @ J1
         Jc2 = cMj2.action @ J2
-        J = (Jc2 - Jc1)[2, :]
-        return J
+        J = Jc2 - Jc1
+        if dir_index is None:
+            return J
+        if isinstance(dir_index, list):
+            return J[:dir_index[0], :]
+        return J[dir_index, :]
 
     def getOneCollisionVelDiff(self, col, res):
         '''Compute the velocity difference between the two colliding objects. '''
@@ -262,13 +301,13 @@ class BasicRobot(pin.RobotWrapper):
         a = (cMj1 * a1 - cMj2 * a2).linear[2]
         return a
 
-    def getCollisionJacobian(self, collisions=None):
+    def getCollisionJacobian(self, collisions=None, direction=None):
         '''From a collision list, return the Jacobian corresponding to the normal direction.  '''
         if collisions is None:
             collisions = self.getCollisionList()
         if len(collisions) == 0:
             return np.ndarray([0, self.model.nv])
-        J = np.vstack([self.getOneCollisionJacobian(c, r)
+        J = np.vstack([self.getOneCollisionJacobian(c, r, direction)
                       for (i, c, r) in collisions])
         return J
 

@@ -88,7 +88,8 @@ if __name__ == "__main__":
     ddq = robot.a0  # accelerations in joint-space (derivative of dq)
 
     # modify initial pose
-    q[-2] -= math.pi / 8.
+    for i in range(1, 6):
+        q[-i] -= math.pi / 16. * (1 - 2 * (i % 2 == 0))
 
     # visualize robot
     robot.viz = robot.initViz(meshcat_monitor.MeshcatVisualizer)
@@ -96,89 +97,105 @@ if __name__ == "__main__":
     robot.loadViewerModel()
     robot.displayVisuals(True)
     robot.viz.viewer['/Cameras/default/rotated/<object>'].set_transform(
-        tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
+        tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))  # moving the camera to a better spot
     robot.display(q)
     time.sleep(0.3)  # let the user see the robot in its default pose briefly before simulating
 
     # simulation settings
-    dt = 0.005                           # time step size to integrate with (can be different than display fps)
-    fps = 20                             # frames per second to display
-    Kp_contact = 1 / dt                  # stiffness constant for contact distance (Proportional control)
-    Kv_contact = 1 / dt                  # stiffness constant for contact velocity (Derivative control)
-    Kv_impact = 0.1                      # stiffness constant for impact velocity (how bouncy impacts are)
-    Kf = 0.01                            # joint-space friction constant
-    tau = np.zeros((robot.model.nv))     # control torques/forces in joint-space
-    loops_to_disp = int((1 / fps) / dt)  # number of time steps to simulate before re-displaying
-    warn_if_not_real_time = True         # produce a warning if not able to display in real time
+    dt = 0.001                                  # time step size to integrate with (can be different than display fps)
+    fps = 30                                    # frames per second to display
+    K_contact_dist = 1 / dt                     # stiffness constant for contact distance (Proportional control)
+    K_contact_vel = 1 / dt                      # stiffness constant for contact velocity (Derivative control)
+    K_joint_friction = 0.05                     # joint-space friction constant
+    K_slip_dist_to_force = 40.                  # stiffness constant for the slip distance (Proportional control)
+    max_slip_force = 1000.                      # maximum sliding force to apply before slipping
+    tau = np.zeros((robot.model.nv))            # control torques/forces in joint-space
+    loops_to_disp = int((1 / fps) / dt)         # number of time steps to simulate before re-displaying
+    warn_if_not_real_time = True                # produce a warning if not able to display in real time
+    floor_joint_id = robot.joint_ids["floor"]
     loop_counter = 0
     target_time = time.time()
 
     # sim until the user closes the visualizer window
     while robot.viz.is_open():
+        fs_ext = [pin.Force(np.zeros(6)) for _ in range(len(robot.model.joints))]
 
-        # compute the model's "M" = Mass matrix and "b" = Nonlinear force components
+        # compute the model's "M" = Mass matrix and "nle" = Nonlinear force components
         # in joint-space (force due to gravity + coriolis forces)
-        M = pin.crba(robot.model, robot.data, q)
-        b = pin.nle(robot.model, robot.data, q, dq)
+        pin.computeAllTerms(robot.model, robot.data, q, dq)
+        M = robot.data.M
+        nle = robot.data.nle
 
         # add some joint friction (but don't apply any joint friction forces to the
         # floating 6-dof root joint, by using [-6:] slicing)
-        tau[-6:] = -Kf * dq[-6:]
-
-        # simulate the resulting acceleration (forward dynamics)
-        Fq = tau - b
-        M_inv = np.linalg.inv(M)
-        ddq = M_inv @ Fq  # solves F = M*a for acceleration in joint-space
+        tau[-6:] = -K_joint_friction * dq[-6:]
 
         # check and account for collisions
         robot.computeCollisions(q, dq)
-        collisions = robot.getCollisionList()
+        collisions = robot.getAndProcessCollisions(floor_joint_id)
         if not collisions:
-            already_contact = set()
+
+            # simulate the resulting acceleration without collisions (forward dynamics)
+            ddq = pin.aba(robot.model, robot.data, q, dq, tau, fs_ext)
+
         else:
-            c_norm_distances = robot.getCollisionDistances(collisions)
-            J_q_to_c_norm = robot.getCollisionJacobian(collisions)  # transforms joint space to collision normal direction
-            c_norm_coriolis_accel = robot.getCollisionJdotQdot(collisions)
 
-            # for a new contact, add in an elastic impact velocity
-            collision_ids = [e[0] for e in collisions]
-            if Kv_impact > 0:
-                new_col_idx = [i for i, e in enumerate(collision_ids) if e not in already_contact]
-                already_contact = set(collision_ids)
-                if new_col_idx:
-                    J_proj = np.stack([J_q_to_c_norm[i] for i in new_col_idx], axis=0)
-                    impact_vel = (np.linalg.pinv(J_proj) @ J_proj) @ dq
-                    dq -= impact_vel * Kv_impact
+            # calculate an external restorative force caused by the contact point sliding
+            # past its original point parallel to the contact normal, similar to the restorative penetration
+            # spring force.
+            # TODO: calculate the actual contact force add a friction cone calc, instead of using a simple force threshold
+            for joint_id in robot.colliding_joints:
 
-            # update the external forces on contact points due to friction cone effects
-            # TODO: use a more realistic method than this to apply forces to the end
-            # effectors (contact points) using the f_ext forces. This method is
-            # super hacky/incorrect...
-            c_vel_diffs = robot.getCollisionVelDiff(collisions)
-            floor_joint_id = 0
-            c_vel_diffs[:, 2:] = 0.  # only keep the x,y components on the contact surface
-            for cnt, (i, col, res) in enumerate(collisions):
-                contact = res.getContact(0)
-                g1 = robot.collision_model.geometryObjects[col.first]
-                g2 = robot.collision_model.geometryObjects[col.second]
-                joint_id = g1.parentJoint if g1.parentJoint != floor_joint_id else g2.parentJoint
-                fq_slide = robot.getJointJacobian(joint_id).T @ (0.5 * c_vel_diffs[cnt, :])
-                Fq += fq_slide
+                # predict where the contact point will be in 0.5 time steps, to reduce overshoot
+                contact_vel = pin.getVelocity(robot.model, robot.data, joint_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+                predicted_contact_pos = robot.contact_dict[joint_id].pos + 0.5 * contact_vel.vector[:3] * dt
+                predicted_dist_from_first_contact = predicted_contact_pos - robot.first_contacts[joint_id].pos
+
+                # zero out any normal-dir error, that will be handled in quadprog.solve_qp
+                predicted_dist_from_first_contact[2] = 0.
+
+                # use a stiffness constant to estimate a restorative force
+                restorative_force = K_slip_dist_to_force * predicted_dist_from_first_contact / dt
+
+                # translate the restorative_force into the joint's LOCAL reference frame (fs_ext's reference frame)
+                f_sliding = robot.data.oMi[joint_id].actInv(pin.Force(restorative_force, np.zeros(3)))
+
+                # remove angular effects
+                f_sliding.angular[:] = 0.
+
+                # if the restorative force would exceed a max slip force
+                if np.linalg.norm(f_sliding.linear) > max_slip_force:
+                    # allow slipping from the first contact point
+                    robot.first_contacts.pop(joint_id)
+                else:
+                    # otherwise apply the restorative force by adding it to the existing external forces
+                    fs_ext[joint_id] += f_sliding
+
+            # Compute the joint torques with the external force
+            tau_ext = pin.rnea(robot.model, robot.data, q, dq, np.zeros(robot.model.nv), fs_ext)
+
+            # Calculate all the joint torques, correcting for nonlinear-effect terms
+            Fq = (tau - nle) + (tau_ext - nle)
 
             # Find new joint-space accelerations (ddq) that account for the contact, by using "Gauss'
             # principle of least constraint" to solve a "convex quadratic problem" of the form:
-            #     Minimize:        1/2 ddq^T M ddq - Fq^T ddq (quadratic energy in the system to minimize)
+            #     Minimize:        1/2 ddq^T M ddq - Fq^T ddq (energy in the system in quadratic form, to minimize)
             #     With constraint: C^T ddq >= d               (constrained accel in the contact normal direction)
             # The reason this works is because the "Least action principle" implies that the energy
             # in the system will be minimized in the most "realistic" path of action. Therefore the most
             # realistic constrained acceleration (ddq) is the one with the least energy, and also doesn't
-            # violate the constraint.
-            # NOTE: d is used as a penalty term for penetration, since penetration may occur with finite time steps.
-            # NOTE: "C^T ddq" is just "J_q_to_c_norm ddq" which is acceleration in the contact normal direction, which
-            # we need to add the coriolis acceleration to by subtracting it from the b side.
+            # violate the constraint during the search.
+            # To understand the constraint:
+            #   d is used as a penalty term for penetration, since penetration may occur with finite
+            #       time steps.
+            #   "C^T ddq" is just "J_q_to_c_norm ddq" which is acceleration in the contact normal direction,
+            #       which we need to add the coriolis acceleration to by subtracting it from the d side.
+            J_q_to_c_norm = robot.getCollisionJacobian(collisions, direction=2)  # transforms joint space to collision norm dir (index 2)
             c_norm_velocity = J_q_to_c_norm @ dq
+            c_norm_distances = robot.getCollisionDistances(collisions)
+            c_norm_coriolis_accel = robot.getCollisionJdotQdot(collisions)
             C = J_q_to_c_norm.T
-            d = - c_norm_coriolis_accel - Kp_contact * c_norm_distances - Kv_contact * c_norm_velocity
+            d = - c_norm_coriolis_accel - K_contact_dist * c_norm_distances - K_contact_vel * c_norm_velocity
             ddq, _, _, _, _, _ = quadprog.solve_qp(M, Fq, C, d)
 
         # integrate the acceleration (ddq) to update the model's velocities (dq), and positions (q)
