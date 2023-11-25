@@ -26,6 +26,6 @@ This is an example dev environment, with a focus on robotics development using "
 4. A pop up should appear in the lower right hand corner, select the "Reopen in Container" option.
 5. Wait for the container to build, this will only happen once, but may take awhile.
 6. Run or debug a file:
-    1. Open one of the example files, such as "examples/pinocchio_demo.py" in file editor.
+    1. Open one of the example files, such as "examples/hello_world_example.py" in file editor.
     2. Once a file is open, you can run it by using the "> Run Code" command (it's suggested you binding this to a hotkey).
     3. Once a file is open, you can debug it by ensuring your debug configuration is on "auto" and then pressing F5.

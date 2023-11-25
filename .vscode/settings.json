@@ -57,6 +57,8 @@
         "ylim",
         "Qdot",
         "Jdot",
-        "rnea"
+        "rnea",
+        "ndarray",
+        "Phong"
     ]
 }

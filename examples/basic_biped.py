@@ -1,18 +1,17 @@
+from basic_robot import BasicRobot, math, np, pin
 
-import basic_robot as br
-
-inches = lambda value: value / 39.3701  # convert to sim units: from inches --> meters
-grams = lambda value: value / 1000.  # convert to sim units: from grams --> kg
+inches2m = lambda value: value / 39.3701  # convert to sim units: from inches2m --> meters
+grams2kg = lambda value: value / 1000.  # convert to sim units: from grams2kg --> kg
 
 
-class BasicBiped(br.BasicRobot):
-    leg_length = inches(9)
+class BasicBiped(BasicRobot):
+    leg_length = inches2m(9)
     pelvis_width = leg_length * 5 / 9
     pelvis_depth = pelvis_width / 4
     pelvis_height = pelvis_width / 2
-    motor_mass = grams(88.)
-    leg_mass = grams(10.)
-    foot_mass = grams(50.)
+    motor_mass = grams2kg(88.)
+    leg_mass = grams2kg(10.)
+    foot_mass = grams2kg(50.)
     joints = [{
         'name': "floor",
         'joint_model': 'fixed',
@@ -27,7 +26,7 @@ class BasicBiped(br.BasicRobot):
         'dimensions': (pelvis_depth, pelvis_width, pelvis_height),
         'color': 'blue',
         'contacting': "floor"
-    }] + br.mirror_joints([{
+    }] + BasicRobot.mirror_joints([{
         'name': "hip_side_rotation",
         'parent': "pelvis",
         'joint_model': "RX",
@@ -72,154 +71,40 @@ class BasicBiped(br.BasicRobot):
     }])
 
 
-if __name__ == "__main__":
-    import math
-    import time
-    import quadprog
-    import numpy as np
-    import pinocchio as pin
+def _example_simulation():
     import meshcat_monitor
     import meshcat.transformations as tf
 
     # create robot
     robot = BasicBiped()
-    q = robot.q0  # positions in joint-space
-    dq = robot.v0  # velocities in joint-space (derivative of q)
-    ddq = robot.a0  # accelerations in joint-space (derivative of dq)
+
+    # visualize robot
+    robot.View(
+        meshcat_monitor.MeshcatVisualizer,
+        tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
+
+    # simulate the robot
+    sim = BasicRobot.Sim(robot, display=True, display_rate=1.)
 
     # modify initial pose
     for i in range(1, 6):
-        q[-i] -= math.pi / 16. * (1 - 2 * (i % 2 == 0))
+        sim.q[-i] -= math.pi / 16. * (1 - 2 * (i % 2 == 0))
 
-    # visualize robot
-    robot.viz = robot.initViz(meshcat_monitor.MeshcatVisualizer)
-    robot.initViewer(open=True)
-    robot.loadViewerModel()
-    robot.displayVisuals(True)
-    robot.viz.viewer['/Cameras/default/rotated/<object>'].set_transform(
-        tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))  # moving the camera to a better spot
-    robot.display(q)
-    time.sleep(0.3)  # let the user see the robot in its default pose briefly before simulating
-
-    # simulation settings
-    dt = 0.0005                          # time step size to integrate with (can be different than display fps)
-    fps = 30                             # frames per second to display
-    K_contact_dist = 1 / dt              # stiffness constant for contact distance (Proportional control)
-    K_contact_vel = 1 / dt               # stiffness constant for contact velocity (Derivative control)
-    K_joint_friction = 0.1               # joint-space friction constant
-    K_slip_dist_to_force = 20.           # stiffness constant for the slip distance (Proportional control)
-    max_slip_force = 100.                # maximum sliding force to apply before slipping
-    tau = np.zeros((robot.model.nv))     # control torques/forces in joint-space
-    warn_if_not_real_time = True         # produce a warning if not able to display in real time
-    display_rate = 1.                    # 1. is real-time, .5 is half-speed, 2. is sped up by 2x
-    loops_to_disp = int(                 # number of time steps to simulate before re-displaying
-        (1 / fps) / (dt / display_rate))
-    floor_joint_id = robot.joint_ids.get("floor")
-    loop_counter = 0
-    target_time = time.time()
-    next_warning_time = time.time()
+    # let the user see the robot in its default pose briefly before starting the simulation
+    sim.show(sleep_time=0.3)
 
     # sim until the user closes the visualizer window
     while robot.viz.is_open():
+
+        # user defined control inputs (tau) and user defined external forces (fs_ext)
         fs_ext = [pin.Force(np.zeros(6)) for _ in range(len(robot.model.joints))]
+        tau = np.zeros((robot.model.nv))
 
-        # compute the model's "M" = Mass matrix and "nle" = Nonlinear force components
-        # in joint-space (force due to gravity + coriolis forces)
-        pin.computeAllTerms(robot.model, robot.data, q, dq)
-        M = robot.data.M
-        nle = robot.data.nle
+        # apply some random joint torques to make the simulation more interesting
+        tau[-6:] = 0.2
 
-        # add some joint friction (but don't apply any joint friction forces to the
-        # floating 6-dof root joint, by using [6:] slicing)
-        tau[6:] = -K_joint_friction * dq[6:]
+        sim.step(tau, fs_ext)
 
-        # check and account for collisions
-        robot.computeCollisions(q, dq)
-        collisions = robot.getAndProcessCollisions(floor_joint_id)
-        if not collisions:
 
-            # simulate the resulting acceleration without collisions (forward dynamics)
-            ddq = pin.aba(robot.model, robot.data, q, dq, tau, fs_ext)
-
-        else:
-
-            # calculate an external restorative force caused by the contact point sliding
-            # past its original point parallel to the contact normal, similar to the restorative penetration
-            # spring force.
-            # TODO: calculate the actual contact force and add a friction cone calc, instead of using this simple force threshold
-            for joint_id in robot.colliding_joints:
-
-                # predict where the contact point will be in 0.5 time steps, to reduce overshoot
-                contact_vel = pin.getVelocity(robot.model, robot.data, joint_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
-                predicted_contact_pos = robot.contact_dict[joint_id].pos + 0.5 * contact_vel.vector[:3] * dt
-                predicted_dist_from_first_contact = predicted_contact_pos - robot.first_contacts[joint_id].pos
-
-                # zero out any normal-dir error, that will be handled in quadprog.solve_qp
-                predicted_dist_from_first_contact[2] = 0.
-
-                # use a stiffness constant to estimate a restorative force
-                restorative_force = K_slip_dist_to_force * predicted_dist_from_first_contact / dt
-
-                # translate the restorative_force into the joint's LOCAL reference frame (fs_ext's reference frame)
-                f_sliding = robot.data.oMi[joint_id].actInv(pin.Force(restorative_force, np.zeros(3)))
-
-                # remove angular effects
-                f_sliding.angular[:] = 0.
-
-                # if the restorative force would exceed a max slip force
-                if np.linalg.norm(f_sliding.linear) > max_slip_force:
-                    # allow slipping from the first contact point
-                    robot.first_contacts.pop(joint_id)
-                else:
-                    # otherwise apply the restorative force by adding it to the existing external forces
-                    fs_ext[joint_id] += f_sliding
-
-            # Compute the joint torques with the external force
-            tau_ext = pin.rnea(robot.model, robot.data, q, dq, np.zeros(robot.model.nv), fs_ext)
-
-            # Calculate all the joint torques, correcting for nonlinear-effect terms
-            Fq = (tau - nle) + (tau_ext - nle)
-
-            # Find new joint-space accelerations (ddq) that account for the contact, by using "Gauss'
-            # principle of least constraint" to solve a "convex quadratic problem" of the form:
-            #     Minimize:        1/2 ddq^T M ddq - Fq^T ddq (energy in the system in quadratic form, to minimize)
-            #     With constraint: C^T ddq >= d               (constrained accel in the contact normal direction)
-            # The reason this works is because the "Least action principle" implies that the energy
-            # in the system will be minimized in the most "realistic" path of action. Therefore the most
-            # realistic constrained acceleration (ddq) is the one with the least energy, and also doesn't
-            # violate the constraint during the search.
-            # To understand the constraint:
-            #   d is used as a penalty term for penetration, since penetration may occur with finite
-            #       time steps.
-            #   "C^T ddq" is just "J_q_to_c_norm ddq" which is acceleration in the contact normal direction,
-            #       which we need to add the coriolis acceleration to by subtracting it from the d side.
-            J_q_to_c_norm = robot.getCollisionJacobian(collisions, direction=2)  # transforms joint space to collision norm dir (index 2)
-            c_norm_velocity = J_q_to_c_norm @ dq
-            c_norm_distances = robot.getCollisionDistances(collisions)
-            c_norm_coriolis_accel = robot.getCollisionJdotQdot(collisions)
-            C = J_q_to_c_norm.T
-            d = - c_norm_coriolis_accel - K_contact_dist * c_norm_distances - K_contact_vel * c_norm_velocity
-            ddq, _, _, _, _, _ = quadprog.solve_qp(M, Fq, C, d)
-
-        # integrate the acceleration (ddq) to update the model's velocities (dq), and positions (q)
-        dq += ddq * dt
-        q = pin.integrate(robot.model, q, dq * dt)
-
-        # update display
-        loop_counter += 1
-        updated_display = loop_counter % loops_to_disp == 0
-        if updated_display:
-            robot.display(q)
-            robot.displayCollisionMarkers(collisions)
-
-        # wait for next time step
-        target_time += dt / display_rate
-        new_time = time.time()
-        diff_time = target_time - new_time
-        sleep_time = max(0, diff_time)
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-        elif warn_if_not_real_time and diff_time < -0.5 and updated_display and new_time > next_warning_time:
-            next_warning_time = new_time + 5.  # don't allow a warning or another 5 seconds
-            print(f'Warning: Time slowed by {diff_time:0.3f} seconds. Consider '
-                  'lowering the fps value, or raising the integration time (dt).')
+if __name__ == "__main__":
+    _example_simulation()
