@@ -1,4 +1,4 @@
-from basic_robot import BasicRobot, math, np, pin
+from robotics.basic_robot import BasicRobot, math, np, pin
 
 inches2m = lambda value: value / 39.3701  # convert to sim units: from inches2m --> meters
 grams2kg = lambda value: value / 1000.  # convert to sim units: from grams2kg --> kg
@@ -72,7 +72,7 @@ class BasicBiped(BasicRobot):
 
 
 def _example_simulation():
-    import meshcat_monitor
+    import robotics.meshcat_monitor
     import meshcat.transformations as tf
 
     # create robot
@@ -80,7 +80,7 @@ def _example_simulation():
 
     # visualize robot
     robot.View(
-        meshcat_monitor.MeshcatVisualizer,
+        robotics.meshcat_monitor.MeshcatVisualizer,
         tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
 
     # simulate the robot
