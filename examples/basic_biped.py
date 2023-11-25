@@ -102,19 +102,20 @@ if __name__ == "__main__":
     time.sleep(0.3)  # let the user see the robot in its default pose briefly before simulating
 
     # simulation settings
-    dt = 0.001                                  # time step size to integrate with (can be different than display fps)
+    dt = 0.0005                                 # time step size to integrate with (can be different than display fps)
     fps = 30                                    # frames per second to display
     K_contact_dist = 1 / dt                     # stiffness constant for contact distance (Proportional control)
     K_contact_vel = 1 / dt                      # stiffness constant for contact velocity (Derivative control)
-    K_joint_friction = 0.05                     # joint-space friction constant
-    K_slip_dist_to_force = 40.                  # stiffness constant for the slip distance (Proportional control)
-    max_slip_force = 1000.                      # maximum sliding force to apply before slipping
+    K_joint_friction = 0.1                      # joint-space friction constant
+    K_slip_dist_to_force = 20.                  # stiffness constant for the slip distance (Proportional control)
+    max_slip_force = 100.                       # maximum sliding force to apply before slipping
     tau = np.zeros((robot.model.nv))            # control torques/forces in joint-space
     loops_to_disp = int((1 / fps) / dt)         # number of time steps to simulate before re-displaying
     warn_if_not_real_time = True                # produce a warning if not able to display in real time
     floor_joint_id = robot.joint_ids["floor"]
     loop_counter = 0
     target_time = time.time()
+    next_warning_time = time.time()
 
     # sim until the user closes the visualizer window
     while robot.viz.is_open():
@@ -127,8 +128,8 @@ if __name__ == "__main__":
         nle = robot.data.nle
 
         # add some joint friction (but don't apply any joint friction forces to the
-        # floating 6-dof root joint, by using [-6:] slicing)
-        tau[-6:] = -K_joint_friction * dq[-6:]
+        # floating 6-dof root joint, by using [6:] slicing)
+        tau[6:] = -K_joint_friction * dq[6:]
 
         # check and account for collisions
         robot.computeCollisions(q, dq)
@@ -211,10 +212,12 @@ if __name__ == "__main__":
 
         # wait for next time step
         target_time += dt
-        diff_time = target_time - time.time()
+        new_time = time.time()
+        diff_time = target_time - new_time
         sleep_time = max(0, diff_time)
         if sleep_time > 0:
             time.sleep(sleep_time)
-        elif warn_if_not_real_time and diff_time < -0.5 and updated_display:
+        elif warn_if_not_real_time and diff_time < -0.5 and updated_display and new_time > next_warning_time:
+            next_warning_time = new_time + 5.  # don't allow a warning or another 5 seconds
             print(f'Warning: Time slowed by {diff_time:0.3f} seconds. Consider '
                   'lowering the fps value, or raising the integration time (dt).')
