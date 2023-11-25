@@ -43,11 +43,13 @@ RUN pip install \
 # create a symbolic linking python to python3 for conveniencce
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# Generate stubs for pinocchio (Note that Pylance still has trouble reading these, so Jedi is recommended)
+# Generate stubs for pinocchio, and fix the missing pinocchio_pywrap and visualize stub imports
 RUN pip install pybind11-stubgen
 RUN cd -P -- "$(python -c "import pinocchio; import os; print(os.path.dirname(pinocchio.__file__))")/.." \
     && pybind11-stubgen pinocchio -o . \
-    && touch pinocchio/py.typed
+    && touch pinocchio/py.typed \
+    && echo "from pinocchio_pywrap import *" >> pinocchio/__init__.pyi \
+    && echo "from visualize import *" >> pinocchio/__init__.pyi
 
 # NOTE: this is how you can edit your .bashrc
 #   RUN echo "some new text in your bashrc file" >> /etc/bash.bashrc

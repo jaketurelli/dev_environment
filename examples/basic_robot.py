@@ -4,6 +4,7 @@ import hppfcl as fcl
 import math
 import numpy as np
 import meshcat
+import typing
 
 
 class BasicRobot(pin.RobotWrapper):
@@ -50,6 +51,7 @@ class BasicRobot(pin.RobotWrapper):
         self.joint_frame_ids = {}
         self.long_joint_ids = {}
         self.body_frame_ids = {}
+        self.joint_id_to_body_frame_id = {}
         self.contact_pairs = {}
         self.geom_ids = {}
         self.contact_joint_ids = {}
@@ -96,6 +98,7 @@ class BasicRobot(pin.RobotWrapper):
                 self.colliding_joints.add(joint_id)
                 contact = res.getContact(0)
                 if joint_id in self.contact_dict:
+                    continue
                     contact.pos = (contact.pos + self.contact_dict[joint_id].pos) * 0.5
                 self.contact_dict[joint_id] = contact
 
@@ -202,6 +205,7 @@ class BasicRobot(pin.RobotWrapper):
         self.model.appendBodyToJoint(joint_id, body_inertia, body_placement)
         frame_name = f'{self.name}.{name}.body'
         self.body_frame_ids[frame_name] = self.model.addBodyFrame(frame_name, joint_id, body_placement, -1)
+        self.joint_id_to_body_frame_id[joint_id] = self.body_frame_ids[frame_name]
         if contacting:
             self.contact_body_frame_ids[frame_name] = self.body_frame_ids[frame_name]
 
@@ -366,6 +370,57 @@ class BasicRobot(pin.RobotWrapper):
     def drawFrameVelocities(self):
         for frame_id in self.body_frame_ids.values():
             self.viz.drawFrameVelocities(frame_id=frame_id)
+
+    def forwardKinematics(
+        self,
+        frame_ids: typing.List[np.ndarray],
+        joint_positions: typing.List[np.ndarray],
+        joint_velocities: typing.Optional[np.ndarray] = None,
+    ) -> typing.Union[
+        typing.List[np.ndarray],
+        typing.Tuple[typing.List[np.ndarray], typing.List[np.ndarray]],
+    ]:
+        """Compute end-effector positions (and velocities) for the given joint configuration.
+
+        Args:
+            joint_positions:  Flat list of angular joint positions.
+            joint_velocities: Optional. Flat list of angular joint
+                velocities.
+
+        Returns:
+            If only joint positions are given: List of end-effector
+            positions. Each position is given as an np.array with x,y,z
+            positions.
+            If joint positions and velocities are given: Tuple with
+            (i) list of end-effector positions and (ii) list of
+            end-effector velocities. Each position and velocity is given
+            as an np.array with x,y,z components.
+        """
+        pin.framesForwardKinematics(
+            self.model, self.data, joint_positions
+        )
+        positions = [
+            np.asarray(self.data.oMf[frame_id].translation).reshape(-1).tolist()
+            for frame_id in frame_ids
+        ]
+        if joint_velocities is None:
+            return positions
+        else:
+            pin.forwardKinematics(
+                self.model, self.data, joint_positions, joint_velocities
+            )
+            velocities = []
+            for frame_id in frame_ids:
+                local_to_world_transform = pin.SE3.Identity()
+                local_to_world_transform.rotation = self.data.oMf[
+                    frame_id
+                ].rotation
+                v_local = pin.getFrameVelocity(
+                    self.model, self.data, frame_id
+                )
+                v_world = local_to_world_transform.act(v_local)
+                velocities.append(v_world.linear)
+            return positions, velocities
 
 
 def mirror_joints(one_sides_values, flip_direction='y', side_is_right=False, rename_first_parent=False):

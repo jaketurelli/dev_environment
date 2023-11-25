@@ -143,7 +143,7 @@ if __name__ == "__main__":
             # calculate an external restorative force caused by the contact point sliding
             # past its original point parallel to the contact normal, similar to the restorative penetration
             # spring force.
-            # TODO: calculate the actual contact force add a friction cone calc, instead of using a simple force threshold
+            # TODO: calculate the actual contact force and add a friction cone calc, instead of using this simple force threshold
             for joint_id in robot.colliding_joints:
 
                 # predict where the contact point will be in 0.5 time steps, to reduce overshoot

@@ -1,13 +1,10 @@
 {
     "editor.fontFamily": "'Courier New', monospace",
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.autopep8"
-    },
     "autopep8.args": [
         "--max-line-length=160",
         "--ignore=E731"
     ],
-    "python.languageServer": "Jedi",
+    "python.analysis.stubPath": "/usr/local/lib/python3.10/dist-packages/cmeel.prefix/lib/python3.10/site-packages/pinocchio",
     "editor.formatOnSave": true,
     "terminal.integrated.env.linux": {
         "CPP_WARNS": "-Werror -Wsuggest-attribute=pure -Wsuggest-attribute=const -Wsuggest-attribute=noreturn -Wsuggest-attribute=format -Wmissing-format-attribute -Wall -Wextra -pedantic -Wcast-align -Wcast-qual -Wctor-dtor-privacy -Wdisabled-optimization -Winit-self -Wlogical-op -Wmissing-declarations -Wmissing-include-dirs -Wnoexcept -Wold-style-cast -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo -Wstrict-null-sentinel -Wswitch-default -Wundef -Wno-unused -Wdouble-promotion -Wstrict-overflow=5 -Wstrict-aliasing=2 -Wformat=2 -Weffc++"
