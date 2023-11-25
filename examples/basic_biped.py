@@ -6,10 +6,10 @@ grams = lambda value: value / 1000.  # convert to sim units: from grams --> kg
 
 
 class BasicBiped(br.BasicRobot):
-    pelvis_width = inches(5)
+    leg_length = inches(9)
+    pelvis_width = leg_length * 5 / 9
     pelvis_depth = pelvis_width / 4
     pelvis_height = pelvis_width / 2
-    leg_length = inches(9)
     motor_mass = grams(88.)
     leg_mass = grams(10.)
     foot_mass = grams(50.)
@@ -102,17 +102,19 @@ if __name__ == "__main__":
     time.sleep(0.3)  # let the user see the robot in its default pose briefly before simulating
 
     # simulation settings
-    dt = 0.0005                                 # time step size to integrate with (can be different than display fps)
-    fps = 30                                    # frames per second to display
-    K_contact_dist = 1 / dt                     # stiffness constant for contact distance (Proportional control)
-    K_contact_vel = 1 / dt                      # stiffness constant for contact velocity (Derivative control)
-    K_joint_friction = 0.1                      # joint-space friction constant
-    K_slip_dist_to_force = 20.                  # stiffness constant for the slip distance (Proportional control)
-    max_slip_force = 100.                       # maximum sliding force to apply before slipping
-    tau = np.zeros((robot.model.nv))            # control torques/forces in joint-space
-    loops_to_disp = int((1 / fps) / dt)         # number of time steps to simulate before re-displaying
-    warn_if_not_real_time = True                # produce a warning if not able to display in real time
-    floor_joint_id = robot.joint_ids["floor"]
+    dt = 0.0005                          # time step size to integrate with (can be different than display fps)
+    fps = 30                             # frames per second to display
+    K_contact_dist = 1 / dt              # stiffness constant for contact distance (Proportional control)
+    K_contact_vel = 1 / dt               # stiffness constant for contact velocity (Derivative control)
+    K_joint_friction = 0.1               # joint-space friction constant
+    K_slip_dist_to_force = 20.           # stiffness constant for the slip distance (Proportional control)
+    max_slip_force = 100.                # maximum sliding force to apply before slipping
+    tau = np.zeros((robot.model.nv))     # control torques/forces in joint-space
+    warn_if_not_real_time = True         # produce a warning if not able to display in real time
+    display_rate = 1.                    # 1. is real-time, .5 is half-speed, 2. is sped up by 2x
+    loops_to_disp = int(                 # number of time steps to simulate before re-displaying
+        (1 / fps) / (dt / display_rate))
+    floor_joint_id = robot.joint_ids.get("floor")
     loop_counter = 0
     target_time = time.time()
     next_warning_time = time.time()
@@ -211,7 +213,7 @@ if __name__ == "__main__":
             robot.displayCollisionMarkers(collisions)
 
         # wait for next time step
-        target_time += dt
+        target_time += dt / display_rate
         new_time = time.time()
         diff_time = target_time - new_time
         sleep_time = max(0, diff_time)

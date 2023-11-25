@@ -83,7 +83,10 @@ class BasicRobot(pin.RobotWrapper):
         self.contact_joint_to_index = {}
 
     def getAndProcessCollisions(self, floor_joint_id):
+        if floor_joint_id is None:
+            return None
         collisions = self.getCollisionList()
+        old_collisions = self.contact_dict
         self.colliding_joints = set()
         self.new_collisions = set()
         if not collisions:
@@ -97,9 +100,14 @@ class BasicRobot(pin.RobotWrapper):
                 self.contact_joint_to_index[joint_id] = index
                 self.colliding_joints.add(joint_id)
                 contact = res.getContact(0)
-                if joint_id in self.contact_dict:
-                    continue
-                    contact.pos = (contact.pos + self.contact_dict[joint_id].pos) * 0.5
+                if joint_id in self.contact_dict and joint_id in old_collisions:
+                    # NOTE: this simplification throws away all but one collision per joint
+                    # by using the new contact that's closest to the old contact, to prevent jitter
+                    old_contact_pos = old_collisions[joint_id].pos
+                    new_pos_dist_1 = np.linalg.norm(old_contact_pos - self.contact_dict[joint_id].pos)
+                    new_pos_dist_2 = np.linalg.norm(old_contact_pos - contact.pos)
+                    if new_pos_dist_1 > new_pos_dist_2:
+                        self.contact_dict[joint_id] = contact
                 self.contact_dict[joint_id] = contact
 
             for joint_id in range(len(self.model.joints)):
@@ -353,10 +361,6 @@ class BasicRobot(pin.RobotWrapper):
             if num_collisions < self.num_collisions:
                 for i in range(num_collisions, self.num_collisions):
                     self.viz.viewer[self.patchName.format(i)].delete()
-            else:
-                for i in range(self.num_collisions, num_collisions):
-                    self.viz.viewer[self.patchName.format(i)].set_object(
-                        meshcat.geometry.Cylinder(.01, .05), self.red_material)
             self.num_collisions = num_collisions
 
         # move the geometries into place for each collision point
@@ -366,6 +370,8 @@ class BasicRobot(pin.RobotWrapper):
                 np.array([0, 1, 0]), contact.normal).matrix()
             T = np.r_[np.c_[R, contact.pos], [[0, 0, 0, 1]]]
             self.viz.viewer[self.patchName.format(i)].set_transform(T)
+            self.viz.viewer[self.patchName.format(i)].set_object(
+                meshcat.geometry.Cylinder(.01, .05), self.red_material)
 
     def drawFrameVelocities(self):
         for frame_id in self.body_frame_ids.values():
