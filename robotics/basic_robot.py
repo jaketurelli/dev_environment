@@ -67,10 +67,10 @@ class BasicRobot(pin.RobotWrapper):
                     self.collision_model.addCollisionPair(pin.CollisionPair(self.geom_ids[name1], self.geom_ids[name2]))
 
         # create data and default q/v
-        self.data = self.model.createData()
-        self.collision_data = self.collision_model.createData()
+        self.data: pin.Data = self.model.createData()
+        self.collision_data: pin.GeometryData = self.collision_model.createData()
         self.collision_data.collisionRequests.enable_contact = bool(self.contact_pairs)
-        self.visual_data = self.visual_model.createData()
+        self.visual_data: pin.GeometryData = self.visual_model.createData()
         self.a0 = pin.utils.zero(self.nv)
         self.v0 = pin.utils.zero(self.nv)
         self.q0 = pin.neutral(self.model)

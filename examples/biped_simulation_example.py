@@ -97,7 +97,7 @@ def _example_simulation():
     # sim until the user closes the visualizer window
     while robot.viz.is_open():
 
-        # user defined control inputs (tau) and user defined external forces (fs_ext)
+        # user defined control inputs (tau) and user defined external forces (fs_ext: expressed in the local frame of the joints)
         fs_ext = [pin.Force(np.zeros(6)) for _ in range(len(robot.model.joints))]
         tau = np.zeros((robot.model.nv))
 

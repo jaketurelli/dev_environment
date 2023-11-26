@@ -17,6 +17,7 @@ class Sim():
         self.dt = 0.0005                   # time step size to integrate with (can be different than display fps)
         self.fps = 30                      # frames per second to display
         self.K_joint_friction = 0.1        # joint-space friction constant
+        self.Kv_impact = 0.2               # elastic impact velocity multiplier (1. is perfectly elastic, 0. is non-elastic)
         self.K_slip_dist_to_force = 50.    # stiffness constant for the slip distance (Proportional control)
         self.max_slip_force = 50.          # maximum sliding force to apply before slipping
         self.warn_if_not_real_time = True  # produce a warning if not able to display in real time
@@ -87,6 +88,13 @@ class Sim():
 
         else:
 
+            # for new contacts, add in an elastic impact velocity if Kv_impact > 0.
+            J_q_to_c_norm = self.robot.getCollisionJacobian(collisions, direction=2)  # transforms joint space to collision norm dir (index 2)
+            if self.Kv_impact > 0. and self.robot.new_collisions:
+                J_proj = np.stack([J_q_to_c_norm[self.robot.contact_joint_to_index[i]] for i in self.robot.new_collisions], axis=0)
+                impact_vel = (np.linalg.pinv(J_proj) @ J_proj) @ self.dq
+                self.dq -= impact_vel * self.Kv_impact
+
             # calculate an external restorative force caused by the contact point sliding
             # past its original point parallel to the contact normal, similar to the restorative penetration
             # spring force.
@@ -137,7 +145,6 @@ class Sim():
             #       time steps.
             #   "C^T ddq" is just "J_q_to_c_norm ddq" which is acceleration in the contact normal direction,
             #       which we need to add the coriolis acceleration to by subtracting it from the d side.
-            J_q_to_c_norm = self.robot.getCollisionJacobian(collisions, direction=2)  # transforms joint space to collision norm dir (index 2)
             c_norm_velocity = J_q_to_c_norm @ self.dq
             c_norm_distances = self.robot.getCollisionDistances(collisions)
             c_norm_coriolis_accel = self.robot.getCollisionJdotQdot(collisions)
