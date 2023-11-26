@@ -1,4 +1,5 @@
-from robotics.basic_robot import BasicRobot, math, np, pin
+import math
+from robotics.basic_sim import Sim, BasicRobot, np, pin
 
 inches2m = lambda value: value / 39.3701  # convert to sim units: from inches2m --> meters
 grams2kg = lambda value: value / 1000.  # convert to sim units: from grams2kg --> kg
@@ -84,7 +85,7 @@ def _example_simulation():
         tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
 
     # simulate the robot
-    sim = BasicRobot.Sim(robot, display=True, display_rate=1.)
+    sim = Sim(robot, display=True, display_rate=1.)
 
     # modify initial pose
     for i in range(1, 6):
@@ -103,6 +104,7 @@ def _example_simulation():
         # apply some random joint torques to make the simulation more interesting
         tau[-6:] = 0.2
 
+        # steps the simulation one time-step, recalculates all terms, and displays at the given FPS
         sim.step(tau, fs_ext)
 
 
