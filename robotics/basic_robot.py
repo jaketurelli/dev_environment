@@ -48,6 +48,7 @@ class BasicRobot(pin.RobotWrapper):
         self.name = self.__class__.__name__ if name is None else name
         self._fixed_joint_poses = {}
         self.joint_ids = {}
+        self.frame_ids = {}
         self.joint_frame_ids = {}
         self.long_joint_ids = {}
         self.body_frame_ids = {}
@@ -183,10 +184,12 @@ class BasicRobot(pin.RobotWrapper):
         # add body
         self.model.appendBodyToJoint(joint_id, body_inertia, body_placement)
         frame_name = f'{self.name}.{name}.body'
-        self.body_frame_ids[frame_name] = self.model.addBodyFrame(frame_name, joint_id, body_placement, -1)
-        self.joint_id_to_body_frame_id[joint_id] = self.body_frame_ids[frame_name]
+        frame_id = self.model.addBodyFrame(frame_name, joint_id, body_placement, -1)
+        self.body_frame_ids[frame_name] = frame_id
+        self.frame_ids[name] = frame_id
+        self.joint_id_to_body_frame_id[joint_id] = frame_id
         if contacting:
-            self.contact_body_frame_ids[frame_name] = self.body_frame_ids[frame_name]
+            self.contact_body_frame_ids[frame_name] = frame_id
 
         # add geometry
         if geometry is not None:

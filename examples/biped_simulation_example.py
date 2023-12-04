@@ -85,7 +85,7 @@ def _example_simulation():
         tf.rotation_matrix(-math.pi / 2, [0.2, 0.2, 1], [1, 0, 0.7]))
 
     # simulate the robot
-    sim = Sim(robot, display=True, display_rate=1.)
+    sim = Sim(robot, display=True, display_rate=1., dt=0.0005)
 
     # modify initial pose
     for i in range(1, 6):

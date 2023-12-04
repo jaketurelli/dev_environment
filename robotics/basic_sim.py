@@ -49,6 +49,7 @@ class Sim():
     def updateAllTermsForLoopIteration(self):
         if self.last_update != self.loop_counter:
             pin.computeAllTerms(self.robot.model, self.robot.data, self.q, self.dq)
+            pin.framesForwardKinematics(self.robot.model, self.robot.data, self.q)
             self.last_update = self.loop_counter
 
     def show(self, sleep_time=None):
@@ -146,6 +147,7 @@ class Sim():
             #   "C^T ddq" is just "J_q_to_c_norm ddq" which is acceleration in the contact normal direction,
             #       which we need to add the coriolis acceleration to by subtracting it from the d side.
             c_norm_velocity = J_q_to_c_norm @ self.dq
+            c_norm_velocity[:] = c_norm_velocity * (c_norm_velocity < 0.)  # remove out-of-contact-norm velocity contributions
             c_norm_distances = self.robot.getCollisionDistances(collisions)
             c_norm_coriolis_accel = self.robot.getCollisionJdotQdot(collisions)
             C = J_q_to_c_norm.T
