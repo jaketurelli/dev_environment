@@ -38,7 +38,11 @@ RUN pip install \
     pin \
 
     # robotics visualization
-    meshcat
+    meshcat \
+
+    # additional ML libraries
+    pandas
+
 
 # create a symbolic linking python to python3 for conveniencce
 RUN ln -s /usr/bin/python3 /usr/bin/python
