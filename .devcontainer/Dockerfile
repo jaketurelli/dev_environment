@@ -1,6 +1,12 @@
 # start with a base dev container
 FROM mcr.microsoft.com/devcontainers/base:jammy
 
+
+
+#todo: update this for react build environment
+
+
+
 # Configure apt and install packages in noninteractive mode
 RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
